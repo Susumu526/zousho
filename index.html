@@ -127,6 +127,7 @@ td.th img,td.th .ph{width:30px;height:44px;object-fit:cover;border-radius:2px;di
 #scanner .hud{position:absolute;left:0;right:0;top:0;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:linear-gradient(#000c,#0000);display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 #scanner .step{font-size:18px;font-weight:700;font-family:var(--f-display)}
 #scanner .sub{font-size:12.5px;opacity:.85}
+#scanner .count.on{background:#3DDC84;color:#062b14;font-weight:700}
 #scanner .count{font-size:12px;background:#ffffff22;border-radius:999px;padding:3px 10px;white-space:nowrap}
 #scanner .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
 #scanner .flash.on{opacity:.8;transition:none}
@@ -200,7 +201,7 @@ nav.tabs .dot{position:absolute;top:2px;left:calc(50% + 8px);background:var(--wa
       </div>
       <div class="row">
         <button class="btn primary" id="mSearch">候補を探す</button>
-        <label class="btn" for="mPhoto">表紙の写真を付ける</label><input class="vh" id="mPhoto" type="file" accept="image/*">
+        <label class="btn" for="mPhoto">写真を付ける（表紙・裏表紙）</label><input class="vh" id="mPhoto" type="file" accept="image/*" multiple>
         <span class="note" id="mPhotoName"></span>
       </div>
       <div class="msg" id="mMsg"></div>
@@ -219,7 +220,7 @@ nav.tabs .dot{position:absolute;top:2px;left:calc(50% + 8px);background:var(--wa
     <video id="vid" playsinline muted></video>
     <canvas class="ov" id="ov"></canvas>
     <div class="flash" id="flash"></div>
-    <div class="hud"><div><div class="step" id="step">準備中…</div><div class="sub" id="sub"></div></div><span class="count" id="count">0冊</span></div>
+    <div class="hud"><div><div class="step" id="step">準備中…</div><div class="sub" id="sub"></div></div><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><span class="count" id="count">0冊</span><span class="count" id="cvChip">枠：準備中</span></div></div>
   </div>
   <div class="bar">
     <div class="thumbs" id="sthumbs"></div>
@@ -229,7 +230,7 @@ nav.tabs .dot{position:absolute;top:2px;left:calc(50% + 8px);background:var(--wa
       <button class="sbtn" id="sSkip">表紙なし</button>
     </div>
     <div class="auto" id="sAuto">ピントと位置が安定すると自動で撮影します</div>
-    <div class="ctl"><button class="sbtn" id="sEnd" style="flex:1">終了</button></div>
+    <div class="ctl"><button class="sbtn" id="sCam" hidden>カメラ切替</button><button class="sbtn" id="sEnd" style="flex:1">終了</button></div>
   </div>
 </div>
 
@@ -255,7 +256,7 @@ try{Object.assign(cfg,JSON.parse(localStorage.getItem("zousho.cfg")||"{}"))}catc
 const saveCfg=()=>{try{localStorage.setItem("zousho.cfg",JSON.stringify(cfg))}catch{}};
 async function api(action,body={}){
   if(!cfg.url||!cfg.token)throw new Error("設定（歯車）で保存先URLと合言葉を入れてください");
-  const r=await fetch(cfg.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action,token:cfg.token,...body})});
+  let r;try{r=await fetch(cfg.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action,token:cfg.token,...body})})}catch{throw new Error("保存先に接続できません。電波と保存先URLを確かめてください")}
   let j;try{j=await r.json()}catch{throw new Error("保存先から応答がありません。URLを確かめてください")}
   if(!j.ok)throw new Error(j.error||"保存先でエラーが起きました");
   return j;
@@ -305,12 +306,28 @@ function parse192(s){if(!/^19[12]\d{10}$/.test(s))return null;const c=s.slice(3,
 
 /* ================= OpenCV (crop) ================= */
 let cvReady=false,cvLoading=null;
+let cvState="未読込";
 function loadCV(){
   if(cvLoading)return cvLoading;
+  cvState="読み込み中";
+  const urls=["https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js","https://docs.opencv.org/4.8.0/opencv.js"];
   cvLoading=new Promise(res=>{
-    const s=document.createElement("script");s.src="https://docs.opencv.org/4.8.0/opencv.js";s.async=true;
-    s.onerror=()=>res(false);document.head.appendChild(s);
-    const t0=Date.now();(function poll(){if(window.cv&&typeof window.cv.Mat==="function"){cvReady=true;res(true)}else if(Date.now()-t0>60000)res(false);else setTimeout(poll,200)})();
+    let i=0;
+    const tryNext=()=>{
+      if(i>=urls.length){cvState="使えません";res(false);return}
+      const s=document.createElement("script");s.src=urls[i++];s.async=true;
+      const t0=Date.now();let dead=false;
+      s.onerror=()=>{dead=true;tryNext()};document.head.appendChild(s);
+      (function poll(){
+        if(dead)return;
+        const c=window.cv;
+        if(c&&typeof c.Mat==="function"){cvReady=true;cvState="OK";res(true);return}
+        if(c&&typeof c.then==="function"&&!c._waiting){c._waiting=true;c.then(m=>{try{delete m.then}catch{}window.cv=m})}
+        if(Date.now()-t0>45000){dead=true;tryNext();return}
+        setTimeout(poll,200);
+      })();
+    };
+    tryNext();
   });
   return cvLoading;
 }
@@ -318,27 +335,58 @@ function orderQuad(p){
   const s=p.map(q=>q.x+q.y),d=p.map(q=>q.y-q.x);
   return[p[s.indexOf(Math.min(...s))],p[d.indexOf(Math.min(...d))],p[s.indexOf(Math.max(...s))],p[d.indexOf(Math.max(...d))]];
 }
-/* returns {quad:[tl,tr,br,bl]|null, sharp:number} on the given small canvas */
+/* 本の四角い輪郭を探す。
+   1) 輪郭線（エッジ）  2) 明るさで二分  3) 鮮やかさで二分  4) 画面の縁（＝机）の色との違い
+   の4通りで「大きな塊」を作り、四角形に近いものの中から一番大きいものを本とみなす */
 function analyze(canvas){
-  if(!cvReady)return{quad:null,sharp:0};
-  const cv=window.cv,src=cv.imread(canvas),g=new cv.Mat(),b=new cv.Mat(),e=new cv.Mat(),lap=new cv.Mat(),m=new cv.Mat(),sd=new cv.Mat(),cs=new cv.MatVector(),h=new cv.Mat(),k=cv.Mat.ones(3,3,cv.CV_8U);
-  let quad=null,sharp=0;
+  if(!cvReady)return{quad:null};
+  const cv=window.cv,W=canvas.width,H=canvas.height,A=W*H,mats=[];
+  const M=()=>{const m=new cv.Mat();mats.push(m);return m};
+  let best=null,bestScore=0;
   try{
-    cv.cvtColor(src,g,cv.COLOR_RGBA2GRAY);
-    cv.Laplacian(g,lap,cv.CV_64F);cv.meanStdDev(lap,m,sd);sharp=sd.data64F[0]**2;
-    cv.GaussianBlur(g,b,new cv.Size(5,5),0);cv.Canny(b,e,40,120);cv.dilate(e,e,k);
-    cv.findContours(e,cs,h,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
-    const W=canvas.width,H=canvas.height;let best=W*H*.12;
-    for(let i=0;i<cs.size();i++){
-      const c=cs.get(i),a=cv.contourArea(c);
-      if(a>best&&a<W*H*.97){const ap=new cv.Mat();cv.approxPolyDP(c,ap,.02*cv.arcLength(c,true),true);
-        if(ap.rows===4&&cv.isContourConvex(ap)){const pts=[];for(let j=0;j<4;j++)pts.push({x:ap.data32S[j*2],y:ap.data32S[j*2+1]});quad=orderQuad(pts);best=a}
-        ap.delete()}
-      c.delete();
+    const src=cv.imread(canvas);mats.push(src);
+    const rgb=M();cv.cvtColor(src,rgb,cv.COLOR_RGBA2RGB);
+    const g=M();cv.cvtColor(rgb,g,cv.COLOR_RGB2GRAY);
+    const b=M();cv.GaussianBlur(g,b,new cv.Size(5,5),0);
+    const hsv=M();cv.cvtColor(rgb,hsv,cv.COLOR_RGB2HSV);
+    const ch=new cv.MatVector();cv.split(hsv,ch);const sat=M();cv.GaussianBlur(ch.get(1),sat,new cv.Size(5,5),0);
+    for(let i=0;i<ch.size();i++)ch.get(i).delete();ch.delete();
+    const k5=cv.Mat.ones(5,5,cv.CV_8U),k7=cv.Mat.ones(7,7,cv.CV_8U),k15=cv.Mat.ones(15,15,cv.CV_8U);mats.push(k5,k7,k15);
+    const masks=[];
+    for(const [lo,hi] of [[30,90],[60,160]]){const e=M();cv.Canny(b,e,lo,hi);cv.morphologyEx(e,e,cv.MORPH_CLOSE,k5,new cv.Point(-1,-1),2);masks.push(e)}
+    for(const c of [b,sat]){const t=M();cv.threshold(c,t,0,255,cv.THRESH_BINARY+cv.THRESH_OTSU);const ti=M();cv.bitwise_not(t,ti);masks.push(t,ti)}
+    // 机の色との違い
+    const bl=M();cv.GaussianBlur(rgb,bl,new cv.Size(7,7),0);const lab=M();cv.cvtColor(bl,lab,cv.COLOR_RGB2Lab);
+    const L=lab.data,bd=[[],[],[]],push=i=>{bd[0].push(L[i*3]);bd[1].push(L[i*3+1]);bd[2].push(L[i*3+2])};
+    for(let y=0;y<H;y++)for(let x=0;x<W;x++){if(y<6||y>=H-6||x<6||x>=W-6)push(y*W+x)}
+    const med=bd.map(a=>{a.sort((p,q)=>p-q);return a[a.length>>1]});
+    const dm=new cv.Mat(H,W,cv.CV_8UC1);mats.push(dm);const D=dm.data;
+    for(let i=0;i<A;i++){const v=Math.sqrt((L[i*3]-med[0])**2+(L[i*3+1]-med[1])**2+(L[i*3+2]-med[2])**2)*3;D[i]=v>255?255:v}
+    for(const th of [45,90]){const t=M();cv.threshold(dm,t,th,255,cv.THRESH_BINARY);cv.morphologyEx(t,t,cv.MORPH_OPEN,k7);cv.morphologyEx(t,t,cv.MORPH_CLOSE,k15);masks.push(t)}
+    for(const m of masks){
+      const cs=new cv.MatVector(),hi=new cv.Mat();cv.findContours(m,cs,hi,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+      for(let i=0;i<cs.size();i++){
+        const c=cs.get(i),hull=new cv.Mat();cv.convexHull(c,hull,false,true);
+        const a=cv.contourArea(hull);
+        if(a>=A*.10&&a<=A*.92){
+          let quad=null,clean=false;
+          for(const [src2,eps] of [[c,.02],[hull,.02],[hull,.03],[hull,.05]]){
+            const ap=new cv.Mat();cv.approxPolyDP(src2,ap,eps*cv.arcLength(src2,true),true);
+            if(ap.rows===4){quad=[];for(let j=0;j<4;j++)quad.push({x:ap.data32S[j*2],y:ap.data32S[j*2+1]});clean=src2===c||eps===.02}
+            ap.delete();if(quad)break;
+          }
+          if(!quad){const r=cv.minAreaRect(hull);if(a/(r.size.width*r.size.height+1e-6)>=.85)quad=cv.RotatedRect.points(r).map(p=>({x:p.x,y:p.y}))}
+          if(quad&&!quad.some(p=>p.x<=3||p.y<=3||p.x>=W-4||p.y>=H-4)){ // 画面の端に張り付いた形は本ではない
+            const sc=a*(clean?1:.9);if(sc>bestScore){bestScore=sc;best=orderQuad(quad)}
+          }
+        }
+        hull.delete();c.delete();
+      }
+      cs.delete();hi.delete();
     }
-  }catch{}
-  [src,g,b,e,lap,m,sd,cs,h,k].forEach(x=>{try{x.delete()}catch{}});
-  return{quad,sharp};
+  }catch(e){console.warn("analyze",e)}
+  mats.forEach(m=>{try{m.delete()}catch{}});
+  return{quad:best};
 }
 const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 function warp(full,quad,maxSide=1400){
@@ -358,7 +406,7 @@ async function cropFile(file){
   const full=document.createElement("canvas");const s=Math.min(1,2400/Math.max(img.width,img.height));full.width=Math.round(img.width*s);full.height=Math.round(img.height*s);full.getContext("2d").drawImage(img,0,0,full.width,full.height);
   const small=scaleCanvas(full,520),r=analyze(small),k=full.width/small.width;
   const q=r.quad&&r.quad.map(p=>({x:p.x*k,y:p.y*k}));
-  return pack(q?warp(full,q):full);
+  const out=pack(q?warp(full,q):full);out.canvas=scaleCanvas(full,1600);return out;
 }
 
 /* ================= barcode ================= */
@@ -378,115 +426,158 @@ async function readCodes(canvas){
 function cropCanvas(c,x,y,w,h){const o=document.createElement("canvas");o.width=Math.round(c.width*w);o.height=Math.round(c.height*h);o.getContext("2d").drawImage(c,c.width*x,c.height*y,o.width,o.height,0,0,o.width,o.height);return o}
 
 /* ================= scanner ================= */
-const S={on:false,stream:null,state:"front",front:null,hist:[],stable:0,maxSharp:0,armed:true,clearN:0,lastQuad:null,codes:new Set(),codeT:0,wake:null,done:0,items:[]};
-const vid=$("#vid"),ov=$("#ov"),work=document.createElement("canvas");
+const S={on:false,stream:null,state:"front",front:null,items:[],armed:true,stableN:0,sharpWin:[],peak:0,startT:0,prevSig:null,capSig:null,
+  codes:new Set(),codeT:0,backReadyAt:0,quad:null,tickN:0,devices:[],devIdx:-1,wake:null,busy:false};
+const vid=$("#vid"),ov=$("#ov"),work=document.createElement("canvas"),tiny=document.createElement("canvas");tiny.width=32;tiny.height=24;
 function beep(f=880){try{const a=S.ac||(S.ac=new (window.AudioContext||window.webkitAudioContext)());const o=a.createOscillator(),g=a.createGain();o.frequency.value=f;g.gain.value=.08;o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+.09)}catch{}}
 function flash(){const f=$("#flash");f.classList.add("on");setTimeout(()=>f.classList.remove("on"),60);if(navigator.vibrate)navigator.vibrate(40)}
-function setStep(){
+function setStep(msg){
   const n=S.items.length;$("#count").textContent=n+"冊";
-  if(S.state==="front"){$("#step").textContent=(n+1)+"冊目　表紙";$("#sub").textContent=S.armed?"本の表紙全体を枠に入れてください":"いったん本を枠の外へ出してください";$("#sSkip").textContent="表紙なし";$("#sAuto").textContent="ピントと位置が止まると自動で撮影します"}
-  else{$("#step").textContent=(n+1)+"冊目　裏表紙";$("#sub").textContent="本を裏返してバーコードを写してください";$("#sSkip").textContent="バーコードなし";$("#sAuto").textContent="バーコードを読めた瞬間に撮影します"}
+  if(S.state==="front"){$("#step").textContent=(n+1)+"冊目　表紙";$("#sSkip").textContent="表紙なし";$("#sAuto").textContent="画面が止まってピントが合うと自動で撮影します（画面タップでピント合わせ）"}
+  else{$("#step").textContent=(n+1)+"冊目　裏表紙";$("#sSkip").textContent="バーコードなし";$("#sAuto").textContent="バーコードを読んで、動きが止まったら撮影します"}
+  $("#sub").textContent=msg||(S.state==="front"?(S.armed?"表紙全体を画面に入れて、手を止めてください":"次の本に置き換えてください"):"本を裏返してバーコードを写してください");
+}
+async function openCamera(){
+  if(S.stream)S.stream.getTracks().forEach(t=>t.stop());
+  const v=S.devIdx>=0&&S.devices[S.devIdx]?{deviceId:{exact:S.devices[S.devIdx].deviceId}}:{facingMode:{ideal:"environment"}};
+  S.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{...v,width:{ideal:1920},height:{ideal:1080}}});
+  vid.srcObject=S.stream;await vid.play().catch(()=>{});
+  const tr=S.stream.getVideoTracks()[0];try{await tr.applyConstraints({advanced:[{focusMode:"continuous"}]})}catch{}
+  try{S.devices=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput");const id=tr.getSettings().deviceId;const i=S.devices.findIndex(d=>d.deviceId===id);if(i>=0)S.devIdx=i}catch{}
+  $("#sCam").hidden=S.devices.length<2;
+  Object.assign(S,{startT:performance.now(),peak:0,sharpWin:[],stableN:0,prevSig:null});
 }
 async function startScan(){
   if(!cfg.url){openSettings();toast("先に保存先を設定してください");return}
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast("このブラウザではカメラを使えません");return}
   $("#scanner").hidden=false;$("#step").textContent="カメラを準備中…";$("#sub").textContent="";beep(0.01);
-  try{
-    S.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
-  }catch(e){$("#scanner").hidden=true;toast("カメラを使う許可が必要です。ブラウザの設定でカメラを許可してください");return}
-  vid.srcObject=S.stream;await vid.play().catch(()=>{});
-  const tr=S.stream.getVideoTracks()[0];try{await tr.applyConstraints({advanced:[{focusMode:"continuous"}]})}catch{}
+  try{await openCamera()}catch(e){$("#scanner").hidden=true;toast("カメラを使う許可が必要です。ブラウザの設定でカメラを許可してください");return}
   try{S.wake=await navigator.wakeLock.request("screen")}catch{}
-  Object.assign(S,{on:true,state:"front",front:null,hist:[],stable:0,maxSharp:0,armed:true,clearN:0,items:[]});
+  Object.assign(S,{on:true,state:"front",front:null,armed:true,items:[],codes:new Set(),codeT:0,quad:null});
   renderSThumbs();setStep();
-  if(!cvReady){$("#sub").textContent="切り抜き機能を読み込み中…（初回のみ数秒）";loadCV().then(ok=>{if(!ok)toast("切り抜き機能を読み込めませんでした。手動撮影は使えます");setStep()})}
+  if(!cvReady)loadCV();
   loop();
 }
 function stopScan(){
   S.on=false;if(S.stream)S.stream.getTracks().forEach(t=>t.stop());S.stream=null;try{S.wake&&S.wake.release()}catch{}
   $("#scanner").hidden=true;render();
 }
+$("#sCam").onclick=async()=>{if(S.devices.length<2)return;S.devIdx=(S.devIdx+1)%S.devices.length;try{await openCamera();toast("カメラを切り替えました（"+(S.devIdx+1)+"/"+S.devices.length+"）")}catch{toast("このカメラは使えませんでした");S.devIdx=-1;openCamera().catch(()=>{})}};
+$(".stage").onclick=async()=>{ // tap to focus
+  const tr=S.stream&&S.stream.getVideoTracks()[0];if(!tr)return;
+  try{await tr.applyConstraints({advanced:[{focusMode:"single-shot"}]})}catch{}
+  setTimeout(()=>{try{tr.applyConstraints({advanced:[{focusMode:"continuous"}]})}catch{}},1200);
+  S.peak=0;S.sharpWin=[];S.stableN=0;setStep("ピントを合わせています…");
+};
 function grabFull(){const c=document.createElement("canvas");c.width=vid.videoWidth;c.height=vid.videoHeight;c.getContext("2d").drawImage(vid,0,0);return c}
+/* motion fingerprint & sharpness without OpenCV */
+function sig(){const x=tiny.getContext("2d",{willReadFrequently:true});x.drawImage(work,0,0,32,24);const d=x.getImageData(0,0,32,24).data,o=new Float32Array(768);for(let i=0;i<768;i++)o[i]=(d[i*4]+d[i*4+1]+d[i*4+2])/3;return o}
+const sdiff=(a,b)=>{let s=0;for(let i=0;i<a.length;i++)s+=Math.abs(a[i]-b[i]);return s/a.length};
+function sharpness(){
+  const W=work.width,H=work.height,x0=Math.round(W*.15),y0=Math.round(H*.15),w=Math.round(W*.7),h=Math.round(H*.7);
+  const d=work.getContext("2d",{willReadFrequently:true}).getImageData(x0,y0,w,h).data,g=new Float32Array(w*h);
+  let mean=0;for(let i=0;i<w*h;i++){g[i]=(d[i*4]*.3+d[i*4+1]*.59+d[i*4+2]*.11);mean+=g[i]}mean/=w*h;
+  let cv=0;for(let i=0;i<w*h;i++)cv+=(g[i]-mean)**2;const contrast=Math.sqrt(cv/(w*h));
+  let s=0,s2=0,n=0;for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const i=y*w+x,l=4*g[i]-g[i-1]-g[i+1]-g[i-w]-g[i+w];s+=l;s2+=l*l;n++}
+  return{sharp:s2/n-(s/n)**2,contrast};
+}
 function drawOverlay(quad,progress,color){
   const W=ov.clientWidth,H=ov.clientHeight,dpr=devicePixelRatio||1;
-  if(ov.width!==W*dpr){ov.width=W*dpr;ov.height=H*dpr}
+  if(ov.width!==Math.round(W*dpr)){ov.width=Math.round(W*dpr);ov.height=Math.round(H*dpr)}
   const x=ov.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,W,H);
-  if(!quad||!vid.videoWidth)return;
+  if(!vid.videoWidth)return;
   const s=Math.min(W/work.width,H/work.height),ox=(W-work.width*s)/2,oy=(H-work.height*s)/2;
-  x.beginPath();quad.forEach((p,i)=>x[i?"lineTo":"moveTo"](ox+p.x*s,oy+p.y*s));x.closePath();
-  x.fillStyle=color+"22";x.fill();x.lineWidth=3;x.strokeStyle=color;x.stroke();
-  if(progress>0){const cx=quad.reduce((a,p)=>a+p.x,0)/4*s+ox,cy=quad.reduce((a,p)=>a+p.y,0)/4*s+oy;
+  let cx=W/2,cy=H/2;
+  if(!quad){const gw=Math.min(W*.62,H*.5),gh=gw*1.4;x.setLineDash([10,8]);x.lineWidth=2;x.strokeStyle="#ffffffaa";x.strokeRect(cx-gw/2,cy-gh/2,gw,gh);x.setLineDash([])}
+  if(quad){x.beginPath();quad.forEach((p,i)=>x[i?"lineTo":"moveTo"](ox+p.x*s,oy+p.y*s));x.closePath();x.fillStyle=color+"26";x.fill();x.lineWidth=4;x.strokeStyle=color;x.stroke();
+    for(const p of quad){x.beginPath();x.arc(ox+p.x*s,oy+p.y*s,7,0,Math.PI*2);x.fillStyle=color;x.fill()}
+    cx=quad.reduce((a,p)=>a+p.x,0)/4*s+ox;cy=quad.reduce((a,p)=>a+p.y,0)/4*s+oy}
+  if(progress>0){x.beginPath();x.arc(cx,cy,26,0,Math.PI*2);x.fillStyle="#0006";x.fill();
     x.beginPath();x.arc(cx,cy,22,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,progress));x.lineWidth=5;x.strokeStyle="#fff";x.stroke()}
 }
 async function loop(){
   if(!S.on)return;
   const t0=performance.now();
-  try{await tick()}catch(e){console.warn(e)}
-  setTimeout(loop,Math.max(40,150-(performance.now()-t0)));
+  if(!S.busy){S.busy=true;try{await tick()}catch(e){console.warn(e)}S.busy=false}
+  setTimeout(loop,Math.max(30,140-(performance.now()-t0)));
 }
+const NEED=5; // ~0.7秒 止まったら撮影
 async function tick(){
   if(!vid.videoWidth)return;
-  const s=480/Math.max(vid.videoWidth,vid.videoHeight);work.width=Math.round(vid.videoWidth*s);work.height=Math.round(vid.videoHeight*s);
-  work.getContext("2d").drawImage(vid,0,0,work.width,work.height);
-  const r=analyze(work),diag=Math.hypot(work.width,work.height);
-  // arming: after a capture, wait until the previous book leaves, moves, or a different book is placed
-  if(!S.armed){
-    if(!r.quad)S.clearN++;
-    else if(S.lastQuad&&Math.max(...r.quad.map((p,i)=>dist(p,S.lastQuad[i])))>diag*.15)S.clearN+=2;
-    else if(S.lastSig&&sigDiff(signature(work,r.quad),S.lastSig)>22)S.clearN+=2;
-    if(S.clearN>=3){S.armed=true;setStep()}
-  }
-  S.maxSharp=Math.max(S.maxSharp*.995,r.sharp);
-  if(r.quad&&S.prevQuad&&Math.max(...r.quad.map((p,i)=>dist(p,S.prevQuad[i])))<diag*.018)S.stable++;else S.stable=0;
-  S.prevQuad=r.quad;
-  const need=5,sharpOk=r.sharp>=S.maxSharp*.65&&r.sharp>15;
+  const k=360/Math.max(vid.videoWidth,vid.videoHeight);work.width=Math.round(vid.videoWidth*k);work.height=Math.round(vid.videoHeight*k);
+  work.getContext("2d",{willReadFrequently:true}).drawImage(vid,0,0,work.width,work.height);
+  S.tickN++;
+  const sg=sig(),motion=S.prevSig?sdiff(sg,S.prevSig):99;S.prevSig=sg;
+  if(cvReady&&S.tickN%2===0){const q=analyze(work).quad;
+    if(!q){S.miss=(S.miss||0)+1;if(S.miss>3)S.quad=null}
+    else{S.miss=0;const far=!S.quad||Math.max(...q.map((p,i)=>dist(p,S.quad[i])))>work.width*.06;
+      S.quad=far?q:q.map((p,i)=>({x:(p.x+S.quad[i].x)/2,y:(p.y+S.quad[i].y)/2}))}}
+  $("#cvChip").textContent=cvReady?(S.quad?"枠：本を認識中":"枠：本を探しています"):"枠：切り抜き機能 "+cvState;
+  $("#cvChip").className="count"+(cvReady&&S.quad?" on":"");
+  const {sharp,contrast}=sharpness();
+  S.peak=Math.max(S.peak*.997,sharp);
+  if(motion<3.5){S.stableN++;S.sharpWin.push(sharp)}else{S.stableN=0;S.sharpWin=[]}
+  if(S.sharpWin.length>8)S.sharpWin.shift();
+  // 撮影後は、本を入れ替える・裏返すなど大きな変化が起きるまで待つ
+  if(!S.armed&&S.capSig&&sdiff(sg,S.capSig)>18){S.armed=true;setStep()}
+  const warm=performance.now()-S.startT>1200;
+  const settled=S.sharpWin.length>=3&&sharp>=Math.max(...S.sharpWin)*.85;   // ピントが落ち着いた
+  const focused=sharp>=S.peak*.45&&contrast>12;                              // ぼけていない・何か写っている
   if(S.state==="front"){
-    drawOverlay(r.quad,S.armed&&sharpOk?S.stable/need:0,S.armed?"#7FD39E":"#F3C969");
-    if(S.armed&&r.quad&&S.stable>=need&&sharpOk)captureFront(r.quad);
+    const ready=S.armed&&warm&&focused;
+    drawOverlay(S.quad,ready?S.stableN/NEED:0,S.armed?"#3DDC84":"#F3C969");
+    if(S.armed){
+      if(motion>=3.5)setStep(S.stableN?undefined:"手を止めてください");
+      else if(!focused)setStep("ピントを合わせています…（画面タップでも合わせられます）");
+      else setStep("このまま止めてください");
+    }
+    if(ready&&S.stableN>=NEED&&settled)captureFront();
   }else{
-    drawOverlay(r.quad,0,"#8EC5FF");
+    drawOverlay(S.quad,0,"#3DDC84");
     if(performance.now()<S.backReadyAt)return;
-    const bc=document.createElement("canvas");const k=1280/Math.max(vid.videoWidth,vid.videoHeight);bc.width=Math.round(vid.videoWidth*Math.min(1,k));bc.height=Math.round(vid.videoHeight*Math.min(1,k));
-    bc.getContext("2d").drawImage(vid,0,0,bc.width,bc.height);
-    for(const c of await readCodes(bc))S.codes.add(c);
+    if(!S.codes.size||!(([...S.codes].some(isbn13ok))&&[...S.codes].some(c=>parse192(c)))){
+      const bc=document.createElement("canvas");const kk=Math.min(1,1280/Math.max(vid.videoWidth,vid.videoHeight));bc.width=Math.round(vid.videoWidth*kk);bc.height=Math.round(vid.videoHeight*kk);
+      bc.getContext("2d").drawImage(vid,0,0,bc.width,bc.height);
+      for(const c of await readCodes(bc))S.codes.add(c);
+    }
     const isbn=[...S.codes].find(isbn13ok);
     if(isbn){
       if(!S.codeT)S.codeT=performance.now();
-      $("#sub").textContent="ISBN "+isbn+" を読み取りました";
-      const has192=[...S.codes].some(c=>parse192(c));
-      if(has192||performance.now()-S.codeT>900)captureBack(r.quad);
-    }
+      const el2=performance.now()-S.codeT;
+      $("#sub").textContent="ISBN "+isbn+"　そのまま止めてください";
+      drawOverlay(S.quad,Math.min(1,S.stableN/3),"#3DDC84");
+      if((S.stableN>=3&&settled)||el2>2500)captureBack();
+    }else $("#sub").textContent="本を裏返してバーコードを写してください";
   }
 }
-/* tiny 12x12 brightness fingerprint of the book area, to notice a different book in the same spot */
-function signature(c,q){
-  const t=document.createElement("canvas");t.width=t.height=12;const x=t.getContext("2d");
-  if(q){const xs=q.map(p=>p.x),ys=q.map(p=>p.y),l=Math.min(...xs),tp=Math.min(...ys);x.drawImage(c,l,tp,Math.max(1,Math.max(...xs)-l),Math.max(1,Math.max(...ys)-tp),0,0,12,12)}
-  else x.drawImage(c,0,0,12,12);
-  const d=x.getImageData(0,0,12,12).data,o=[];for(let i=0;i<d.length;i+=4)o.push((d[i]+d[i+1]+d[i+2])/3);return o;
+async function cropNow(){
+  const full=grabFull();
+  if(!cvReady)return pack(full);
+  const small=scaleCanvas(full,480),r=analyze(small);
+  let q=r.quad&&r.quad.map(p=>({x:p.x*full.width/small.width,y:p.y*full.height/small.height}));
+  if(!q&&S.quad)q=S.quad.map(p=>({x:p.x*full.width/work.width,y:p.y*full.height/work.height}));
+  return pack(q?warp(full,q):full);
 }
-const sigDiff=(a,b)=>a.reduce((s,v,i)=>s+Math.abs(v-b[i]),0)/a.length;
-function quadFull(q){if(!q)return null;const k=vid.videoWidth/work.width;return q.map(p=>({x:p.x*k,y:p.y*k}))}
-function captureFront(q){
+async function captureFront(){
   flash();beep(880);
-  S.front=pack(warp(grabFull(),quadFull(q)));S.lastQuad=q;S.stable=0;
-  S.backReadyAt=performance.now()+700;S.state="back";S.codes=new Set();S.codeT=0;renderSThumbs();setStep();
+  S.front=await cropNow();S.capSig=S.prevSig;S.stableN=0;S.sharpWin=[];
+  S.backReadyAt=performance.now()+600;S.state="back";S.codes=new Set();S.codeT=0;renderSThumbs();setStep();
 }
-function captureBack(q,noCode){
+async function captureBack(noCode){
   flash();beep(1320);
-  const back=pack(warp(grabFull(),quadFull(q)));
+  const back=await cropNow();
   const codes=[...S.codes],isbn=noCode?"":(codes.find(isbn13ok)||""),info=codes.map(parse192).find(Boolean)||null;
   const item={lid:"p"+Date.now().toString(36),front:S.front,back,isbn,info,status:"検索中",format:S.front?"紙":"紙（表紙なし）"};
-  S.items.push(item);S.front=null;S.state="front";S.lastQuad=q||S.lastQuad;S.lastSig=signature(work,q);S.armed=false;S.clearN=0;S.stable=0;S.codes=new Set();S.codeT=0;
+  S.items.push(item);S.front=null;S.state="front";S.capSig=S.prevSig;S.armed=false;S.stableN=0;S.sharpWin=[];S.codes=new Set();S.codeT=0;
   renderSThumbs();setStep();processItem(item);
 }
-$("#sShot").onclick=()=>{
-  if(!S.on)return;
-  if(S.state==="front"){captureFront(S.prevQuad)}else captureBack(S.prevQuad,![...S.codes].some(isbn13ok));
+$("#sShot").onclick=e=>{
+  e.stopPropagation();if(!S.on)return;
+  if(S.state==="front"){S.armed=true;captureFront()}else captureBack(![...S.codes].some(isbn13ok));
 };
 $("#sSkip").onclick=()=>{
   if(S.state==="front"){S.front=null;S.state="back";S.backReadyAt=0;S.codes=new Set();S.codeT=0;setStep();toast("表紙なしで、裏表紙を撮ります")}
-  else captureBack(S.prevQuad,true);
+  else captureBack(true);
 };
 $("#sUndo").onclick=async()=>{
   if(S.state==="back"){S.front=null;S.state="front";S.armed=true;setStep();renderSThumbs();toast("表紙を撮り直します");return}
@@ -499,10 +590,9 @@ $("#sUndo").onclick=async()=>{
 $("#sEnd").onclick=stopScan;
 function renderSThumbs(){
   const box=$("#sthumbs");box.innerHTML="";
-  for(const it of S.items.slice(-12)){
-    const cls=it.status==="保存済み"?"ok":it.status==="要選択"?"wait":it.status==="エラー"?"err":"";
-    const im=it.front||it.back;
-    box.append(el("div",{class:"tb "+cls},im?el("img",{src:im.url,alt:""}):null,el("i",{text:it.status})));
+  for(const it of S.items.slice(-8)){
+    const cls=it.status==="保存済み"?"ok":it.status==="要選択"||it.status==="登録済み"?"wait":it.status==="エラー"?"err":"";
+    for(const im of [it.front,it.back])if(im)box.append(el("div",{class:"tb "+cls},el("img",{src:im.url,alt:""}),el("i",{text:im===it.front?it.status:"裏"})));
   }
   if(S.front)box.append(el("div",{class:"tb"},el("img",{src:S.front.url,alt:""}),el("i",{text:"表紙"})));
   box.scrollLeft=box.scrollWidth;
@@ -514,7 +604,13 @@ function processItem(item){chain=chain.then(()=>doProcess(item)).catch(()=>{});}
 async function doProcess(item){
   if(item.cancel)return;
   try{
-    if(item.isbn&&books.some(b=>b.isbn===item.isbn)){item.status="登録済み";renderSThumbs();toast("すでに本棚にある本です");return}
+    const dup=item.isbn&&books.find(b=>b.isbn===item.isbn);
+    if(dup){
+      item.status="登録済み";
+      if((item.front||item.back)&&!dup.pdfUrl){await saveCover(dup,[item.front,item.back].filter(Boolean));item.status="保存済み";toast("「"+dup.title+"」に表紙を追加しました")}
+      else toast("「"+dup.title+"」はすでに本棚にあります");
+      renderSThumbs();render();return;
+    }
     let cands=[];
     if(item.isbn){try{cands=(await api("search",{isbn:item.isbn})).items}catch(e){item.err=e.message}}
     item.candidates=cands;
@@ -548,7 +644,14 @@ async function saveBook(fields,imgs){
   const j=await api("add",{book:fields,pdf,thumb:thumb?thumb.split(",")[1]:""});
   const b=j.book;books.push(b);cacheBooks();
   if(thumb){thumbMem[b.id]=thumb;idb.put("thumbs",thumb,b.id)}
+  if(list.length&&!b.pdfUrl)toast("本は登録しましたが、表紙PDFを保存できませんでした");
+  else if(list.length)toast("「"+b.title+"」を登録（表紙PDF "+list.length+"ページ）");
   render();return b;
+}
+async function saveCover(b,list){
+  const thumb=await thumbOf(list[0]);
+  const j=await api("cover",{id:b.id,pdf:buildPdf(list),thumb:thumb.split(",")[1]});
+  Object.assign(b,j.book);thumbMem[b.id]=thumb;idb.put("thumbs",thumb,b.id);cacheBooks();render();
 }
 
 /* ================= chooser (candidates) ================= */
@@ -607,16 +710,22 @@ function openChooser(p,onSaved){
 }
 
 /* ================= manual add ================= */
-let mPhoto=null;
-$("#mPhoto").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;$("#mPhotoName").textContent="切り抜き中…";
-  try{mPhoto=await cropFile(f);$("#mPhotoName").textContent="表紙の写真を付けました"}catch{$("#mPhotoName").textContent="写真を読み込めませんでした"}};
+let mPh={front:null,back:null,isbn:"",info:null};
+function mPhLabel(){$("#mPhotoName").textContent=[mPh.front?"表紙✓":"",mPh.back?"裏表紙✓":"",mPh.isbn?"ISBN "+mPh.isbn:""].filter(Boolean).join("　")}
+$("#mPhoto").onchange=async e=>{const fs=[...e.target.files];e.target.value="";if(!fs.length)return;$("#mPhotoName").textContent="写真を読み込み中…";
+  for(const f of fs){try{const im=await cropFile(f);const codes=await readCodes(im.canvas);delete im.canvas;const isbn=codes.find(isbn13ok);
+    if(isbn){mPh.back=im;mPh.isbn=isbn;mPh.info=codes.map(parse192).find(Boolean)||null;if(!$("#mCode").value)$("#mCode").value=isbn}else mPh.front=im}
+    catch{toast("写真を読み込めませんでした")}}
+  mPhLabel()};
 $("#mSearch").onclick=()=>{
-  const title=$("#mTitle").value.trim(),code=normCode($("#mCode").value),fmt=$("#mFmt").value;
-  if(!title&&!code){$("#mMsg").className="msg err";$("#mMsg").textContent="書名かISBN/JANのどちらかを入れてください。";return}
+  const title=$("#mTitle").value.trim(),fmt=$("#mFmt").value;let code=normCode($("#mCode").value)||mPh.isbn;
+  if(!title&&!code){$("#mMsg").className="msg err";
+    $("#mMsg").textContent=mPh.front?"表紙の写真だけでは書名がわかりません。書名の一部を入れるか、裏表紙（バーコード）の写真も付けてください。":"書名（一部でも可）かISBNを入れてください。";return}
   if(code&&/^97/.test(code)&&!isbn13ok(code)){$("#mMsg").className="msg err";$("#mMsg").textContent="ISBNの番号が正しくないようです。確かめてください。";return}
   $("#mMsg").textContent="";
-  openChooser({title:title||"",isbn:code&&isbn13ok(code)?code:"",format:fmt,front:mPhoto},()=>{$("#mTitle").value="";$("#mCode").value="";mPhoto=null;$("#mPhotoName").textContent=""});
+  openChooser({title:title||"",isbn:code&&isbn13ok(code)?code:"",info:mPh.info,format:fmt,front:mPh.front,back:mPh.back},()=>{$("#mTitle").value="";$("#mCode").value="";mPh={front:null,back:null,isbn:"",info:null};mPhLabel()});
 };
+$("#mTitle").onkeydown=$("#mCode").onkeydown=e=>{if(e.key==="Enter"&&!e.isComposing){e.preventDefault();$("#mSearch").click()}};
 
 /* ================= render ================= */
 function filtered(){
@@ -691,7 +800,7 @@ function openDetail(id){
   const sheet=el("div",{class:"sheet",role:"dialog","aria-modal":"true"},
     el("div",{class:"top"},el("h3",{text:b.title}),el("button",{class:"x","aria-label":"閉じる",onclick:close},"×")),
     src?el("div",{class:"bigimgs"},el("img",{src,alt:"表紙"})):null,
-    el("div",{class:"row"},b.pdfUrl?el("a",{class:"btn",href:b.pdfUrl,target:"_blank",rel:"noopener"},"表紙PDFを開く（ドライブ）"):null,
+    el("div",{class:"row"},b.pdfUrl?el("a",{class:"btn",href:b.pdfUrl,target:"_blank",rel:"noopener"},"表紙PDFを開く（表紙・裏表紙）"):null,
       el("label",{class:"btn",for:"recover"},b.pdfUrl?"表紙を撮り直す":"表紙の写真を追加"),fi),
     form,
     el("div",{class:"row"},el("button",{class:"btn primary",async onclick(){if(edit.isbn)edit.isbn=normCode(edit.isbn);await patchBook(b.id,edit);render();close()}},"変更を保存"),
@@ -728,7 +837,7 @@ $("#startScan").onclick=startScan;
 let tt;function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2800)}
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 loadAll();
-setTimeout(loadCV,1500); // 切り抜き機能を先に読み込んでおく
+setTimeout(loadCV,800); // 切り抜き機能を先に読み込んでおく
 </script>
 </body>
 </html>
