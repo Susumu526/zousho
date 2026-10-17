@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>蔵書台帳</title>
+<meta name="theme-color" content="#1E5A48">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="蔵書台帳">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';document.head.appendChild(s)"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{
+  --bg:#F3F4EF; --paper:#FFFFFF; --ink:#1C221F; --muted:#66706A; --line:#D9DDD4;
+  --accent:#1E5A48; --accent-ink:#FFFFFF; --accent-soft:#E2ECE7;
+  --warn:#9A3B2E; --warn-soft:#F6E3DE; --shelf:#C9CFC4; --ok:#2F7D4F;
+  --f-display:"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif;
+  --f-body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --r:10px; color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#141917; --paper:#1C2320; --ink:#E6EAE4; --muted:#98A39C; --line:#2E3833;
+  --accent:#6FBFA2; --accent-ink:#0E1513; --accent-soft:#1F3029;
+  --warn:#F0A08F; --warn-soft:#3A2420; --shelf:#2B3430; --ok:#7FD39E; color-scheme:dark }}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:var(--f-body);font-size:15px;line-height:1.6;
+  padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) calc(84px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+img{max-width:100%}
+[hidden]{display:none!important}
+.wrap{max-width:1100px;margin:0 auto}
+header.mast{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:18px 12px;border-bottom:2px solid var(--ink)}
+h1{font-family:var(--f-display);font-weight:800;font-size:clamp(24px,6vw,32px);margin:0;letter-spacing:.04em}
+.mast .right{display:flex;align-items:center;gap:12px}
+.stats{display:flex;gap:12px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.stats b{color:var(--ink);font-size:16px;margin-right:2px}
+.gear{border:1px solid var(--line);background:var(--paper);border-radius:999px;width:36px;height:36px;display:grid;place-items:center;cursor:pointer}
+.gear svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:1.7}
+.view{padding-block:16px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+input,select,textarea,button{font:inherit;color:inherit}
+.search{flex:1 1 200px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--paper);border-radius:var(--r);padding:9px 14px;cursor:pointer;font-weight:500;font-size:14px;text-decoration:none;color:var(--ink)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.big{padding:16px 18px;font-size:16px;font-weight:700;width:100%}
+.btn.danger{color:var(--warn);border-color:var(--warn)}
+.btn:disabled{opacity:.5;cursor:default}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.note{font-size:12.5px;color:var(--muted)}
+.msg{font-size:13px;padding:8px 10px;border-radius:8px;background:var(--accent-soft)}
+.msg.err{background:var(--warn-soft);color:var(--warn)}
+.msg:empty{display:none}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px}
+.panel h2{font-family:var(--f-display);font-size:18px;margin:0}
+.stack{display:flex;flex-direction:column;gap:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+.form label.full{grid-column:1/-1}
+.form input,.form select{border:1px solid var(--line);border-radius:8px;padding:9px 10px;background:var(--bg);color:var(--ink);font-size:15px;min-width:0}
+@media (max-width:420px){.form{grid-template-columns:1fr}}
+
+/* shelf */
+.shelf{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:18px 14px}
+.cover{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:6px;min-width:0}
+.face{aspect-ratio:2/3;max-width:100%;border-radius:3px 6px 6px 3px;background:var(--paper);border:1px solid var(--line);overflow:hidden;position:relative;box-shadow:2px 3px 0 var(--shelf)}
+.face img{width:100%;height:100%;object-fit:cover;display:block}
+.noimg{position:absolute;inset:0;padding:10px 8px 10px 14px;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(90deg,var(--accent) 0 6px,var(--paper) 6px)}
+.noimg span{font-family:var(--f-display);font-weight:600;font-size:13px;line-height:1.35;word-break:break-all;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.noimg small{font-size:10.5px;color:var(--muted)}
+.cover .t{font-size:12.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.badge{position:absolute;top:5px;left:5px;font-size:10px;padding:1px 6px;border-radius:999px;background:var(--ink);color:var(--bg)}
+.empty{border:1.5px dashed var(--line);border-radius:var(--r);padding:28px 18px;text-align:center;color:var(--muted)}
+.empty h2{font-family:var(--f-display);color:var(--ink);font-size:19px;margin:0 0 6px}
+
+/* table */
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--paper)}
+table{border-collapse:collapse;width:100%;min-width:1100px;font-size:13.5px}
+th{position:sticky;top:0;background:var(--accent-soft);text-align:left;font-size:12px;letter-spacing:.06em;padding:8px 6px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap}
+td{border-bottom:1px solid var(--line);padding:2px 4px}
+td input,td select{width:100%;border:1px solid transparent;background:transparent;padding:6px 4px;border-radius:6px;min-width:0}
+td input:hover,td select:hover{border-color:var(--line)}
+td.mono input{font-family:var(--f-mono);font-size:12.5px}
+td.th img,td.th .ph{width:30px;height:44px;object-fit:cover;border-radius:2px;display:block;cursor:pointer;border:1px solid var(--line);background:var(--accent-soft)}
+.sticky{position:sticky;left:0;background:var(--paper);z-index:1}
+
+/* pending & candidates */
+.pend{display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding-block:10px}
+.pend .imgs{display:flex;gap:4px;flex:none}
+.pend .imgs img{width:44px;height:64px;object-fit:cover;border-radius:3px;border:1px solid var(--line)}
+.pend .info{flex:1;min-width:0;font-size:13px}
+.cands{display:flex;flex-direction:column;gap:8px}
+.cand{all:unset;cursor:pointer;display:flex;gap:10px;padding:10px;border:1px solid var(--line);border-radius:var(--r);background:var(--paper)}
+.cand[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 2px var(--accent)}
+.cand img,.cand .ph{width:46px;height:66px;object-fit:cover;border-radius:2px;background:var(--accent-soft);flex:none}
+.cand .ct{min-width:0;display:flex;flex-direction:column;gap:2px;font-size:12.5px;color:var(--muted)}
+.cand .ct b{font-size:14.5px;color:var(--ink);font-weight:700;line-height:1.4}
+.src{font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:0 6px;align-self:flex-start}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(10,14,12,.55);z-index:40;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;
+  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:14px}
+@media (min-width:700px){.scrim{align-items:center}.sheet{border-radius:16px}}
+.sheet .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.sheet h3{font-family:var(--f-display);margin:0;font-size:19px;line-height:1.35}
+.x{border:0;background:transparent;font-size:26px;line-height:1;cursor:pointer;padding:2px 8px;color:var(--muted)}
+.bigimgs{display:flex;gap:10px;justify-content:center}
+.bigimgs img{max-height:260px;width:auto;border-radius:4px;border:1px solid var(--line);box-shadow:3px 4px 0 var(--shelf)}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--warn-soft);color:var(--warn);padding:10px;border-radius:8px;font-size:13.5px}
+.vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+
+/* scanner */
+#scanner{position:fixed;inset:0;z-index:80;background:#000;color:#fff;display:flex;flex-direction:column}
+#scanner .stage{position:relative;flex:1;min-height:0}
+#scanner video,#scanner canvas.ov{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#scanner .hud{position:absolute;left:0;right:0;top:0;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;background:linear-gradient(#000c,#0000);display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+#scanner .step{font-size:18px;font-weight:700;font-family:var(--f-display)}
+#scanner .sub{font-size:12.5px;opacity:.85}
+#scanner .count{font-size:12px;background:#ffffff22;border-radius:999px;padding:3px 10px;white-space:nowrap}
+#scanner .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+#scanner .flash.on{opacity:.8;transition:none}
+#scanner .bar{background:#0d100f;padding:10px max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:10px}
+#scanner .thumbs{display:flex;gap:8px;align-items:center;min-height:62px;overflow-x:auto}
+#scanner .tb{position:relative;flex:none;width:42px;height:60px;border-radius:3px;overflow:hidden;border:1px solid #fff4;background:#ffffff11}
+#scanner .tb img{width:100%;height:100%;object-fit:cover}
+#scanner .tb i{position:absolute;bottom:0;left:0;right:0;font-style:normal;font-size:9px;text-align:center;background:#000a}
+#scanner .tb.ok{border-color:#7FD39E}#scanner .tb.wait{border-color:#F3C969}#scanner .tb.err{border-color:#F0A08F}
+#scanner .ctl{display:flex;gap:8px;align-items:center;justify-content:space-between}
+#scanner .sbtn{border:1px solid #fff5;background:#ffffff14;color:#fff;border-radius:999px;padding:9px 12px;font-size:13px;cursor:pointer}
+#scanner .shutter{width:64px;height:64px;border-radius:50%;border:4px solid #fff;background:#ffffff33;cursor:pointer;flex:none}
+#scanner .auto{font-size:11.5px;opacity:.8;text-align:center}
+
+nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:center;background:var(--paper);border-top:1px solid var(--line);
+  padding:6px max(16px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+nav.tabs div{display:flex;width:100%;max-width:520px}
+nav.tabs button{flex:1;border:0;background:transparent;padding:6px 0 4px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11.5px;color:var(--muted);cursor:pointer;position:relative}
+nav.tabs svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.7}
+nav.tabs button[aria-selected="true"]{color:var(--accent);font-weight:700}
+nav.tabs .dot{position:absolute;top:2px;left:calc(50% + 8px);background:var(--warn);color:#fff;font-size:10px;border-radius:999px;padding:0 5px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:999px;font-size:13.5px;z-index:90;max-width:90vw;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="mast">
+    <h1>蔵書台帳</h1>
+    <div class="right"><div class="stats" id="stats"></div>
+      <button class="gear" id="openSettings" aria-label="設定"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+  </header>
+
+  <section class="view" id="v-shelf">
+    <div class="toolbar">
+      <input class="search" id="q1" type="search" placeholder="書名・著者・ISBNで探す" aria-label="検索">
+      <div class="chips" id="chips1"></div>
+    </div>
+    <div id="shelf" class="shelf"></div>
+  </section>
+
+  <section class="view" id="v-table" hidden>
+    <div class="toolbar">
+      <input class="search" id="q2" type="search" placeholder="絞り込み" aria-label="絞り込み">
+      <div class="chips" id="chips2"></div>
+      <a class="btn" id="sheetLink" target="_blank" rel="noopener" hidden>スプレッドシートで開く</a>
+      <button class="btn" id="reload">最新に更新</button>
+    </div>
+    <div class="tablebox"><table><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+    <p class="note">セルを書き換えると Google スプレッドシートに保存されます。スプレッドシート側で直した内容は「最新に更新」で反映されます。</p>
+  </section>
+
+  <section class="view stack" id="v-add" hidden>
+    <div class="panel">
+      <h2>集中撮影モード</h2>
+      <p class="note" style="margin:0">カメラを向けるだけで、表紙 → 裏表紙の順に自動で撮影します。本の形に合わせて四角く切り抜き、バーコードから書誌を調べて次々に登録します。無地の机の上に置くと切り抜きが安定します。</p>
+      <button class="btn primary big" id="startScan">撮影を始める</button>
+    </div>
+    <div class="panel" id="pendBox" hidden>
+      <h2>選択待ち <span class="note" id="pendN"></span></h2>
+      <p class="note" style="margin:0">候補が1冊に決まらなかった本です。タップして候補から選んでください。</p>
+      <div id="pendList"></div>
+    </div>
+    <div class="panel">
+      <h2>書名・ISBNで追加</h2>
+      <p class="note" style="margin:0">表紙を捨てた本や電子書籍はこちら。候補から選んで登録します。</p>
+      <div class="form">
+        <label class="full">書名（一部でも可）<input id="mTitle" placeholder="例：吾輩は猫である"></label>
+        <label>ISBN / JAN<input id="mCode" inputmode="numeric" placeholder="978… / 10桁も可"></label>
+        <label>形態<select id="mFmt"><option>紙</option><option>紙（表紙なし）</option><option>電子</option></select></label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="mSearch">候補を探す</button>
+        <label class="btn" for="mPhoto">表紙の写真を付ける</label><input class="vh" id="mPhoto" type="file" accept="image/*">
+        <span class="note" id="mPhotoName"></span>
+      </div>
+      <div class="msg" id="mMsg"></div>
+    </div>
+  </section>
+</div>
+
+<nav class="tabs"><div role="tablist">
+  <button data-tab="shelf" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M4 4h4v16H4zM10 4h4v16h-4zM16.5 5l3.5-.8 3 15.6-3.5.8z"/></svg>本棚</button>
+  <button data-tab="table" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14h18M9 9v11"/></svg>一覧表</button>
+  <button data-tab="add" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>登録<span class="dot" id="pendDot" hidden></span></button>
+</div></nav>
+
+<div id="scanner" hidden>
+  <div class="stage">
+    <video id="vid" playsinline muted></video>
+    <canvas class="ov" id="ov"></canvas>
+    <div class="flash" id="flash"></div>
+    <div class="hud"><div><div class="step" id="step">準備中…</div><div class="sub" id="sub"></div></div><span class="count" id="count">0冊</span></div>
+  </div>
+  <div class="bar">
+    <div class="thumbs" id="sthumbs"></div>
+    <div class="ctl">
+      <button class="sbtn" id="sUndo">ひとつ戻る</button>
+      <button class="shutter" id="sShot" aria-label="手動で撮影"></button>
+      <button class="sbtn" id="sSkip">表紙なし</button>
+    </div>
+    <div class="auto" id="sAuto">ピントと位置が安定すると自動で撮影します</div>
+    <div class="ctl"><button class="sbtn" id="sEnd" style="flex:1">終了</button></div>
+  </div>
+</div>
+
+<div id="sheetRoot"></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const el=(tag,props={},...kids)=>{const e=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k==="class")e.className=v;else if(k==="text")e.textContent=v;else if(k.startsWith("on"))e[k]=v;else e.setAttribute(k,v)}for(const c of kids)if(c!=null)e.append(c);return e};
+const FIELDS=[
+  {k:"title",l:"書名",w:240},{k:"author",l:"著者",w:150},{k:"publisher",l:"出版社",w:130},
+  {k:"year",l:"発行年",w:70,mono:1},{k:"isbn",l:"ISBN",w:140,mono:1},
+  {k:"format",l:"形態",w:110,opts:["紙","紙（表紙なし）","電子"]},
+  {k:"status",l:"状態",w:90,opts:["未読","読書中","読了"]},
+  {k:"ccode",l:"Cコード",w:80,mono:1},{k:"price",l:"本体価格",w:80,mono:1},
+  {k:"location",l:"置き場所",w:110},{k:"memo",l:"メモ",w:200}
+];
+
+/* ================= settings & API ================= */
+let cfg={url:"",token:"",auto:true};
+try{Object.assign(cfg,JSON.parse(localStorage.getItem("zousho.cfg")||"{}"))}catch{}
+const saveCfg=()=>{try{localStorage.setItem("zousho.cfg",JSON.stringify(cfg))}catch{}};
+async function api(action,body={}){
+  if(!cfg.url||!cfg.token)throw new Error("設定（歯車）で保存先URLと合言葉を入れてください");
+  const r=await fetch(cfg.url,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action,token:cfg.token,...body})});
+  let j;try{j=await r.json()}catch{throw new Error("保存先から応答がありません。URLを確かめてください")}
+  if(!j.ok)throw new Error(j.error||"保存先でエラーが起きました");
+  return j;
+}
+
+/* ================= local cache (IndexedDB) ================= */
+const idb=(()=>{let p;const open=()=>p||(p=new Promise((res,rej)=>{const r=indexedDB.open("zousho",1);r.onupgradeneeded=()=>{r.result.createObjectStore("thumbs");r.result.createObjectStore("pending",{keyPath:"lid"})};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}));
+  const tx=async(store,mode,fn)=>{const db=await open();return new Promise((res,rej)=>{const t=db.transaction(store,mode);const s=t.objectStore(store);const q=fn(s);t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error)})};
+  return{get:(s,k)=>tx(s,"readonly",o=>o.get(k)).catch(()=>null),put:(s,v,k)=>tx(s,"readwrite",o=>k===undefined?o.put(v):o.put(v,k)).catch(()=>{}),
+    del:(s,k)=>tx(s,"readwrite",o=>o.delete(k)).catch(()=>{}),all:s=>tx(s,"readonly",o=>o.getAll()).catch(()=>[])}})();
+const thumbMem={};
+
+/* ================= state ================= */
+let books=[],pending=[],sheetUrl="";
+try{books=JSON.parse(localStorage.getItem("zousho.books")||"[]")}catch{}
+const cacheBooks=()=>{try{localStorage.setItem("zousho.books",JSON.stringify(books))}catch{}};
+let filt={q:"",fmt:"すべて"},sort={k:"createdAt",dir:-1};
+
+async function loadAll(){
+  pending=(await idb.all("pending"))||[];
+  for(const b of books){const t=await idb.get("thumbs",b.id);if(t)thumbMem[b.id]=t}
+  render();
+  if(!cfg.url){return}
+  try{const j=await api("list");books=j.books;cacheBooks();render();fetchThumbs()}
+  catch(e){toast(e.message)}
+  api("ping").then(j=>{sheetUrl=j.sheetUrl||"";render()}).catch(()=>{});
+}
+async function fetchThumbs(){
+  const need=[];for(const b of books){if(!b.thumbId)continue;if(thumbMem[b.id])continue;const t=await idb.get("thumbs",b.id);if(t){thumbMem[b.id]=t}else need.push(b)}
+  render();
+  for(let i=0;i<need.length;i+=30){
+    const part=need.slice(i,i+30);
+    try{const j=await api("thumbs",{ids:part.map(b=>b.thumbId)});
+      for(const b of part){const d=j.thumbs[b.thumbId];if(d){thumbMem[b.id]="data:image/jpeg;base64,"+d;idb.put("thumbs",thumbMem[b.id],b.id)}}
+      render()}catch{break}
+  }
+}
+
+/* ================= codes ================= */
+const digits=s=>(s||"").replace(/[^0-9Xx]/g,"").toUpperCase();
+function isbn13ok(s){if(!/^97[89]\d{10}$/.test(s))return false;let t=0;for(let i=0;i<12;i++)t+=+s[i]*(i%2?3:1);return (10-t%10)%10===+s[12]}
+function isbn10to13(s){const b="978"+s.slice(0,9);let t=0;for(let i=0;i<12;i++)t+=+b[i]*(i%2?3:1);return b+((10-t%10)%10)}
+const normCode=raw=>{const d=digits(raw);return d.length===10?isbn10to13(d):d};
+const TARGET={0:"一般",1:"教養",2:"実用",3:"専門",5:"婦人",6:"学参I",7:"学参II",8:"児童",9:"雑誌扱い"};
+const FORM={0:"単行本",1:"文庫",2:"新書",3:"全集・双書",4:"ムック等",5:"事・辞典",6:"図鑑",7:"絵本",8:"磁性媒体等",9:"コミック"};
+function parse192(s){if(!/^19[12]\d{10}$/.test(s))return null;const c=s.slice(3,7),p=+s.slice(7,12);return{ccode:"C"+c,price:p?String(p):"",label:(TARGET[c[0]]||"")+"・"+(FORM[c[1]]||"")}}
+
+/* ================= OpenCV (crop) ================= */
+let cvReady=false,cvLoading=null;
+function loadCV(){
+  if(cvLoading)return cvLoading;
+  cvLoading=new Promise(res=>{
+    const s=document.createElement("script");s.src="https://docs.opencv.org/4.8.0/opencv.js";s.async=true;
+    s.onerror=()=>res(false);document.head.appendChild(s);
+    const t0=Date.now();(function poll(){if(window.cv&&typeof window.cv.Mat==="function"){cvReady=true;res(true)}else if(Date.now()-t0>60000)res(false);else setTimeout(poll,200)})();
+  });
+  return cvLoading;
+}
+function orderQuad(p){
+  const s=p.map(q=>q.x+q.y),d=p.map(q=>q.y-q.x);
+  return[p[s.indexOf(Math.min(...s))],p[d.indexOf(Math.min(...d))],p[s.indexOf(Math.max(...s))],p[d.indexOf(Math.max(...d))]];
+}
+/* returns {quad:[tl,tr,br,bl]|null, sharp:number} on the given small canvas */
+function analyze(canvas){
+  if(!cvReady)return{quad:null,sharp:0};
+  const cv=window.cv,src=cv.imread(canvas),g=new cv.Mat(),b=new cv.Mat(),e=new cv.Mat(),lap=new cv.Mat(),m=new cv.Mat(),sd=new cv.Mat(),cs=new cv.MatVector(),h=new cv.Mat(),k=cv.Mat.ones(3,3,cv.CV_8U);
+  let quad=null,sharp=0;
+  try{
+    cv.cvtColor(src,g,cv.COLOR_RGBA2GRAY);
+    cv.Laplacian(g,lap,cv.CV_64F);cv.meanStdDev(lap,m,sd);sharp=sd.data64F[0]**2;
+    cv.GaussianBlur(g,b,new cv.Size(5,5),0);cv.Canny(b,e,40,120);cv.dilate(e,e,k);
+    cv.findContours(e,cs,h,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+    const W=canvas.width,H=canvas.height;let best=W*H*.12;
+    for(let i=0;i<cs.size();i++){
+      const c=cs.get(i),a=cv.contourArea(c);
+      if(a>best&&a<W*H*.97){const ap=new cv.Mat();cv.approxPolyDP(c,ap,.02*cv.arcLength(c,true),true);
+        if(ap.rows===4&&cv.isContourConvex(ap)){const pts=[];for(let j=0;j<4;j++)pts.push({x:ap.data32S[j*2],y:ap.data32S[j*2+1]});quad=orderQuad(pts);best=a}
+        ap.delete()}
+      c.delete();
+    }
+  }catch{}
+  [src,g,b,e,lap,m,sd,cs,h,k].forEach(x=>{try{x.delete()}catch{}});
+  return{quad,sharp};
+}
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+function warp(full,quad,maxSide=1400){
+  if(!cvReady||!quad)return full;
+  const cv=window.cv;let w=Math.max(dist(quad[0],quad[1]),dist(quad[3],quad[2])),h=Math.max(dist(quad[0],quad[3]),dist(quad[1],quad[2]));
+  const s=Math.min(1,maxSide/Math.max(w,h));w=Math.round(w*s);h=Math.round(h*s);
+  const src=cv.imread(full),dst=new cv.Mat();
+  const a=cv.matFromArray(4,1,cv.CV_32FC2,quad.flatMap(p=>[p.x,p.y])),z=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,w,0,w,h,0,h]);
+  const M=cv.getPerspectiveTransform(a,z);cv.warpPerspective(src,dst,M,new cv.Size(w,h),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
+  const out=document.createElement("canvas");cv.imshow(out,dst);[src,dst,a,z,M].forEach(x=>x.delete());return out;
+}
+function scaleCanvas(c,max){const s=Math.min(1,max/Math.max(c.width,c.height));if(s===1)return c;const o=document.createElement("canvas");o.width=Math.round(c.width*s);o.height=Math.round(c.height*s);o.getContext("2d").drawImage(c,0,0,o.width,o.height);return o}
+const pack=c=>{c=scaleCanvas(c,1400);return{url:c.toDataURL("image/jpeg",.85),w:c.width,h:c.height}};
+async function cropFile(file){
+  await loadCV();
+  let img;try{img=await createImageBitmap(file,{imageOrientation:"from-image"})}catch{const u=URL.createObjectURL(file);img=new Image();img.src=u;await img.decode()}
+  const full=document.createElement("canvas");const s=Math.min(1,2400/Math.max(img.width,img.height));full.width=Math.round(img.width*s);full.height=Math.round(img.height*s);full.getContext("2d").drawImage(img,0,0,full.width,full.height);
+  const small=scaleCanvas(full,520),r=analyze(small),k=full.width/small.width;
+  const q=r.quad&&r.quad.map(p=>({x:p.x*k,y:p.y*k}));
+  return pack(q?warp(full,q):full);
+}
+
+/* ================= barcode ================= */
+let bd=null;try{if("BarcodeDetector" in window)bd=new BarcodeDetector({formats:["ean_13"]})}catch{}
+let zx=null;
+function zxing(){if(zx||!window.ZXing)return zx;const Z=window.ZXing,h=new Map();h.set(Z.DecodeHintType.POSSIBLE_FORMATS,[Z.BarcodeFormat.EAN_13]);zx=new Z.MultiFormatReader();zx.setHints(h);return zx}
+async function readCodes(canvas){
+  const out=[];
+  if(bd){try{(await bd.detect(canvas)).forEach(x=>out.push(x.rawValue))}catch{}}
+  if(!out.length&&zxing()){const Z=window.ZXing;
+    for(const c of [canvas,cropCanvas(canvas,0,0,1,.5),cropCanvas(canvas,0,.5,1,.5)]){
+      try{out.push(zx.decode(new Z.BinaryBitmap(new Z.HybridBinarizer(new Z.HTMLCanvasElementLuminanceSource(c)))).getText())}catch{}
+      finally{try{zx.reset()}catch{}}
+    }}
+  return out;
+}
+function cropCanvas(c,x,y,w,h){const o=document.createElement("canvas");o.width=Math.round(c.width*w);o.height=Math.round(c.height*h);o.getContext("2d").drawImage(c,c.width*x,c.height*y,o.width,o.height,0,0,o.width,o.height);return o}
+
+/* ================= scanner ================= */
+const S={on:false,stream:null,state:"front",front:null,hist:[],stable:0,maxSharp:0,armed:true,clearN:0,lastQuad:null,codes:new Set(),codeT:0,wake:null,done:0,items:[]};
+const vid=$("#vid"),ov=$("#ov"),work=document.createElement("canvas");
+function beep(f=880){try{const a=S.ac||(S.ac=new (window.AudioContext||window.webkitAudioContext)());const o=a.createOscillator(),g=a.createGain();o.frequency.value=f;g.gain.value=.08;o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+.09)}catch{}}
+function flash(){const f=$("#flash");f.classList.add("on");setTimeout(()=>f.classList.remove("on"),60);if(navigator.vibrate)navigator.vibrate(40)}
+function setStep(){
+  const n=S.items.length;$("#count").textContent=n+"冊";
+  if(S.state==="front"){$("#step").textContent=(n+1)+"冊目　表紙";$("#sub").textContent=S.armed?"本の表紙全体を枠に入れてください":"いったん本を枠の外へ出してください";$("#sSkip").textContent="表紙なし";$("#sAuto").textContent="ピントと位置が止まると自動で撮影します"}
+  else{$("#step").textContent=(n+1)+"冊目　裏表紙";$("#sub").textContent="本を裏返してバーコードを写してください";$("#sSkip").textContent="バーコードなし";$("#sAuto").textContent="バーコードを読めた瞬間に撮影します"}
+}
+async function startScan(){
+  if(!cfg.url){openSettings();toast("先に保存先を設定してください");return}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){toast("このブラウザではカメラを使えません");return}
+  $("#scanner").hidden=false;$("#step").textContent="カメラを準備中…";$("#sub").textContent="";beep(0.01);
+  try{
+    S.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}});
+  }catch(e){$("#scanner").hidden=true;toast("カメラを使う許可が必要です。ブラウザの設定でカメラを許可してください");return}
+  vid.srcObject=S.stream;await vid.play().catch(()=>{});
+  const tr=S.stream.getVideoTracks()[0];try{await tr.applyConstraints({advanced:[{focusMode:"continuous"}]})}catch{}
+  try{S.wake=await navigator.wakeLock.request("screen")}catch{}
+  Object.assign(S,{on:true,state:"front",front:null,hist:[],stable:0,maxSharp:0,armed:true,clearN:0,items:[]});
+  renderSThumbs();setStep();
+  if(!cvReady){$("#sub").textContent="切り抜き機能を読み込み中…（初回のみ数秒）";loadCV().then(ok=>{if(!ok)toast("切り抜き機能を読み込めませんでした。手動撮影は使えます");setStep()})}
+  loop();
+}
+function stopScan(){
+  S.on=false;if(S.stream)S.stream.getTracks().forEach(t=>t.stop());S.stream=null;try{S.wake&&S.wake.release()}catch{}
+  $("#scanner").hidden=true;render();
+}
+function grabFull(){const c=document.createElement("canvas");c.width=vid.videoWidth;c.height=vid.videoHeight;c.getContext("2d").drawImage(vid,0,0);return c}
+function drawOverlay(quad,progress,color){
+  const W=ov.clientWidth,H=ov.clientHeight,dpr=devicePixelRatio||1;
+  if(ov.width!==W*dpr){ov.width=W*dpr;ov.height=H*dpr}
+  const x=ov.getContext("2d");x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,W,H);
+  if(!quad||!vid.videoWidth)return;
+  const s=Math.min(W/work.width,H/work.height),ox=(W-work.width*s)/2,oy=(H-work.height*s)/2;
+  x.beginPath();quad.forEach((p,i)=>x[i?"lineTo":"moveTo"](ox+p.x*s,oy+p.y*s));x.closePath();
+  x.fillStyle=color+"22";x.fill();x.lineWidth=3;x.strokeStyle=color;x.stroke();
+  if(progress>0){const cx=quad.reduce((a,p)=>a+p.x,0)/4*s+ox,cy=quad.reduce((a,p)=>a+p.y,0)/4*s+oy;
+    x.beginPath();x.arc(cx,cy,22,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,progress));x.lineWidth=5;x.strokeStyle="#fff";x.stroke()}
+}
+async function loop(){
+  if(!S.on)return;
+  const t0=performance.now();
+  try{await tick()}catch(e){console.warn(e)}
+  setTimeout(loop,Math.max(40,150-(performance.now()-t0)));
+}
+async function tick(){
+  if(!vid.videoWidth)return;
+  const s=480/Math.max(vid.videoWidth,vid.videoHeight);work.width=Math.round(vid.videoWidth*s);work.height=Math.round(vid.videoHeight*s);
+  work.getContext("2d").drawImage(vid,0,0,work.width,work.height);
+  const r=analyze(work),diag=Math.hypot(work.width,work.height);
+  // arming: after a capture, wait until the previous book leaves, moves, or a different book is placed
+  if(!S.armed){
+    if(!r.quad)S.clearN++;
+    else if(S.lastQuad&&Math.max(...r.quad.map((p,i)=>dist(p,S.lastQuad[i])))>diag*.15)S.clearN+=2;
+    else if(S.lastSig&&sigDiff(signature(work,r.quad),S.lastSig)>22)S.clearN+=2;
+    if(S.clearN>=3){S.armed=true;setStep()}
+  }
+  S.maxSharp=Math.max(S.maxSharp*.995,r.sharp);
+  if(r.quad&&S.prevQuad&&Math.max(...r.quad.map((p,i)=>dist(p,S.prevQuad[i])))<diag*.018)S.stable++;else S.stable=0;
+  S.prevQuad=r.quad;
+  const need=5,sharpOk=r.sharp>=S.maxSharp*.65&&r.sharp>15;
+  if(S.state==="front"){
+    drawOverlay(r.quad,S.armed&&sharpOk?S.stable/need:0,S.armed?"#7FD39E":"#F3C969");
+    if(S.armed&&r.quad&&S.stable>=need&&sharpOk)captureFront(r.quad);
+  }else{
+    drawOverlay(r.quad,0,"#8EC5FF");
+    if(performance.now()<S.backReadyAt)return;
+    const bc=document.createElement("canvas");const k=1280/Math.max(vid.videoWidth,vid.videoHeight);bc.width=Math.round(vid.videoWidth*Math.min(1,k));bc.height=Math.round(vid.videoHeight*Math.min(1,k));
+    bc.getContext("2d").drawImage(vid,0,0,bc.width,bc.height);
+    for(const c of await readCodes(bc))S.codes.add(c);
+    const isbn=[...S.codes].find(isbn13ok);
+    if(isbn){
+      if(!S.codeT)S.codeT=performance.now();
+      $("#sub").textContent="ISBN "+isbn+" を読み取りました";
+      const has192=[...S.codes].some(c=>parse192(c));
+      if(has192||performance.now()-S.codeT>900)captureBack(r.quad);
+    }
+  }
+}
+/* tiny 12x12 brightness fingerprint of the book area, to notice a different book in the same spot */
+function signature(c,q){
+  const t=document.createElement("canvas");t.width=t.height=12;const x=t.getContext("2d");
+  if(q){const xs=q.map(p=>p.x),ys=q.map(p=>p.y),l=Math.min(...xs),tp=Math.min(...ys);x.drawImage(c,l,tp,Math.max(1,Math.max(...xs)-l),Math.max(1,Math.max(...ys)-tp),0,0,12,12)}
+  else x.drawImage(c,0,0,12,12);
+  const d=x.getImageData(0,0,12,12).data,o=[];for(let i=0;i<d.length;i+=4)o.push((d[i]+d[i+1]+d[i+2])/3);return o;
+}
+const sigDiff=(a,b)=>a.reduce((s,v,i)=>s+Math.abs(v-b[i]),0)/a.length;
+function quadFull(q){if(!q)return null;const k=vid.videoWidth/work.width;return q.map(p=>({x:p.x*k,y:p.y*k}))}
+function captureFront(q){
+  flash();beep(880);
+  S.front=pack(warp(grabFull(),quadFull(q)));S.lastQuad=q;S.stable=0;
+  S.backReadyAt=performance.now()+700;S.state="back";S.codes=new Set();S.codeT=0;renderSThumbs();setStep();
+}
+function captureBack(q,noCode){
+  flash();beep(1320);
+  const back=pack(warp(grabFull(),quadFull(q)));
+  const codes=[...S.codes],isbn=noCode?"":(codes.find(isbn13ok)||""),info=codes.map(parse192).find(Boolean)||null;
+  const item={lid:"p"+Date.now().toString(36),front:S.front,back,isbn,info,status:"検索中",format:S.front?"紙":"紙（表紙なし）"};
+  S.items.push(item);S.front=null;S.state="front";S.lastQuad=q||S.lastQuad;S.lastSig=signature(work,q);S.armed=false;S.clearN=0;S.stable=0;S.codes=new Set();S.codeT=0;
+  renderSThumbs();setStep();processItem(item);
+}
+$("#sShot").onclick=()=>{
+  if(!S.on)return;
+  if(S.state==="front"){captureFront(S.prevQuad)}else captureBack(S.prevQuad,![...S.codes].some(isbn13ok));
+};
+$("#sSkip").onclick=()=>{
+  if(S.state==="front"){S.front=null;S.state="back";S.backReadyAt=0;S.codes=new Set();S.codeT=0;setStep();toast("表紙なしで、裏表紙を撮ります")}
+  else captureBack(S.prevQuad,true);
+};
+$("#sUndo").onclick=async()=>{
+  if(S.state==="back"){S.front=null;S.state="front";S.armed=true;setStep();renderSThumbs();toast("表紙を撮り直します");return}
+  const it=S.items.pop();if(!it){toast("戻せる本はありません");return}
+  it.cancel=true;
+  if(it.book){try{await api("delete",{id:it.book.id});books=books.filter(b=>b.id!==it.book.id);cacheBooks()}catch(e){toast(e.message)}}
+  if(it.status==="要選択"){pending=pending.filter(p=>p.lid!==it.lid);idb.del("pending",it.lid)}
+  S.state="front";S.armed=true;setStep();renderSThumbs();toast("直前の本を取り消しました。撮り直してください");
+};
+$("#sEnd").onclick=stopScan;
+function renderSThumbs(){
+  const box=$("#sthumbs");box.innerHTML="";
+  for(const it of S.items.slice(-12)){
+    const cls=it.status==="保存済み"?"ok":it.status==="要選択"?"wait":it.status==="エラー"?"err":"";
+    const im=it.front||it.back;
+    box.append(el("div",{class:"tb "+cls},im?el("img",{src:im.url,alt:""}):null,el("i",{text:it.status})));
+  }
+  if(S.front)box.append(el("div",{class:"tb"},el("img",{src:S.front.url,alt:""}),el("i",{text:"表紙"})));
+  box.scrollLeft=box.scrollWidth;
+}
+
+/* ================= processing ================= */
+let chain=Promise.resolve();
+function processItem(item){chain=chain.then(()=>doProcess(item)).catch(()=>{});}
+async function doProcess(item){
+  if(item.cancel)return;
+  try{
+    if(item.isbn&&books.some(b=>b.isbn===item.isbn)){item.status="登録済み";renderSThumbs();toast("すでに本棚にある本です");return}
+    let cands=[];
+    if(item.isbn){try{cands=(await api("search",{isbn:item.isbn})).items}catch(e){item.err=e.message}}
+    item.candidates=cands;
+    const exact=item.isbn&&cands.filter(c=>c.isbn===item.isbn);
+    if(cfg.auto&&exact&&exact.length){
+      const c=exact[0];
+      if(item.cancel)return;
+      const bk=await saveBook({title:c.title,author:c.author,publisher:c.publisher,year:c.year,isbn:item.isbn,format:item.format,status:"未読",
+        ccode:item.info?.ccode||c.ccode||"",price:item.info?.price||c.price||"",location:"",memo:"",coverUrl:item.front?"":(c.cover||"")},item);
+      item.book=bk;item.status="保存済み";
+    }else{
+      item.status="要選択";const p={lid:item.lid,front:item.front,back:item.back,isbn:item.isbn,info:item.info,format:item.format,candidates:cands};
+      pending.push(p);idb.put("pending",p);
+    }
+  }catch(e){item.status="エラー";toast("保存できませんでした："+e.message);
+    const p={lid:item.lid,front:item.front,back:item.back,isbn:item.isbn,info:item.info,format:item.format,candidates:item.candidates||[]};pending.push(p);idb.put("pending",p)}
+  renderSThumbs();render();
+}
+function buildPdf(imgs){
+  const {jsPDF}=window.jspdf;let pdf=null;
+  for(const im of imgs){const w=148,h=Math.round(w*im.h/im.w*10)/10,o=h>=w?"p":"l";
+    if(!pdf)pdf=new jsPDF({unit:"mm",format:[w,h],orientation:o});else pdf.addPage([w,h],o);
+    pdf.addImage(im.url,"JPEG",0,0,w,h)}
+  return pdf?pdf.output("datauristring").split(",")[1]:"";
+}
+function thumbOf(im){return new Promise(res=>{const i=new Image();i.onload=()=>{const c=document.createElement("canvas");const s=260/Math.max(i.width,i.height);c.width=Math.round(i.width*s);c.height=Math.round(i.height*s);c.getContext("2d").drawImage(i,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",.72))};i.src=im.url})}
+async function saveBook(fields,imgs){
+  const list=[imgs&&imgs.front,imgs&&imgs.back].filter(Boolean);
+  let pdf="",thumb="";
+  if(list.length){pdf=buildPdf(list);thumb=await thumbOf(list[0])}
+  const j=await api("add",{book:fields,pdf,thumb:thumb?thumb.split(",")[1]:""});
+  const b=j.book;books.push(b);cacheBooks();
+  if(thumb){thumbMem[b.id]=thumb;idb.put("thumbs",thumb,b.id)}
+  render();return b;
+}
+
+/* ================= chooser (candidates) ================= */
+function candEl(c,on){
+  const img=c.cover?el("img",{src:c.cover,alt:"",loading:"lazy",onerror(){this.replaceWith(el("div",{class:"ph"}))}}):el("div",{class:"ph"});
+  return el("button",{class:"cand",type:"button","aria-pressed":"false",onclick:on},img,
+    el("div",{class:"ct"},el("b",{text:c.title}),el("span",{text:[c.author,c.publisher,c.year].filter(Boolean).join("　")}),
+      c.isbn?el("span",{class:"mono",text:"ISBN "+c.isbn}):null,el("span",{class:"src",text:c.source||""})));
+}
+function openChooser(p,onSaved){
+  const root=$("#sheetRoot");root.innerHTML="";
+  const close=()=>root.innerHTML="";
+  const imgs=el("div",{class:"bigimgs"});[p.front,p.back].filter(Boolean).forEach(im=>imgs.append(el("img",{src:im.url,alt:""})));
+  const q=el("input",{class:"search",id:"cq",placeholder:"書名・著者・ISBNで探し直す",value:p.title||(p.isbn||"")});
+  const msg=el("div",{class:"msg"}),list=el("div",{class:"cands"}),form=el("div",{class:"form"});
+  const formBox=el("div",{class:"stack",hidden:""},el("p",{class:"note",style:"margin:0",text:"内容を確かめて保存してください。"}),form);
+  let draft={};
+  function fill(c){
+    draft={title:"",author:"",publisher:"",year:"",isbn:p.isbn||"",format:p.format||"紙",status:"未読",ccode:p.info?.ccode||"",price:p.info?.price||"",location:"",memo:"",coverUrl:""};
+    if(c)Object.assign(draft,{title:c.title,author:c.author,publisher:c.publisher,year:c.year,isbn:c.isbn||draft.isbn,ccode:draft.ccode||c.ccode||"",price:draft.price||c.price||"",coverUrl:(!p.front&&c.cover)||""});
+    form.innerHTML="";
+    for(const x of FIELDS){let inp;if(x.opts){inp=el("select",{id:"f_"+x.k});x.opts.forEach(o=>inp.add(new Option(o,o)))}else inp=el("input",{id:"f_"+x.k});
+      inp.value=draft[x.k]||"";inp.oninput=()=>draft[x.k]=inp.value;form.append(el("label",{class:x.k==="title"||x.k==="memo"?"full":""},x.l,inp))}
+    formBox.hidden=false;saveBtn.hidden=false;
+  }
+  function showCands(cs){
+    list.innerHTML="";
+    if(!cs.length){msg.className="msg err";msg.textContent="候補が見つかりませんでした。書名の一部や著者名で探し直すか、手入力してください。";return}
+    msg.className="msg";msg.textContent=cs.length+"件の候補があります。当てはまる本をタップしてください。";
+    cs.forEach(c=>{const b=candEl(c,()=>{list.querySelectorAll(".cand").forEach(x=>x.setAttribute("aria-pressed",x===b));fill(c);formBox.scrollIntoView({behavior:"smooth",block:"start"})});list.append(b)});
+  }
+  async function doSearch(){
+    const v=q.value.trim();if(!v)return;msg.className="msg";msg.textContent="探しています…";list.innerHTML="";
+    const code=normCode(v);
+    try{const j=await api("search",/^97[89]\d{10}$/.test(code)?{isbn:code}:{title:v});showCands(j.items)}catch(e){msg.className="msg err";msg.textContent=e.message}
+  }
+  const saveBtn=el("button",{class:"btn primary",hidden:"",async onclick(){
+    if(!draft.title.trim()){toast("書名を入れてください");return}
+    draft.isbn=normCode(draft.isbn);
+    if(draft.isbn&&books.some(b=>b.isbn===draft.isbn)){toast("この本はすでに本棚にあります");return}
+    saveBtn.disabled=true;saveBtn.textContent="保存中…";
+    try{await saveBook({...draft},p);toast("本棚に保存しました");close();onSaved&&onSaved()}
+    catch(e){toast("保存できませんでした："+e.message);saveBtn.disabled=false;saveBtn.textContent="本棚に保存"}
+  }},"本棚に保存");
+  const sheet=el("div",{class:"sheet",role:"dialog","aria-modal":"true"},
+    el("div",{class:"top"},el("h3",{text:"候補から選ぶ"}),el("button",{class:"x","aria-label":"閉じる",onclick:close},"×")),
+    imgs.childElementCount?imgs:null,
+    p.isbn?el("div",{class:"note mono",text:"ISBN "+p.isbn+(p.info?"　"+p.info.ccode+"（"+p.info.label+"）":"")}):null,
+    el("div",{class:"row"},q,el("button",{class:"btn",onclick:doSearch},"探す")),
+    msg,list,
+    el("button",{class:"btn",onclick:()=>{list.querySelectorAll(".cand").forEach(x=>x.setAttribute("aria-pressed","false"));fill(null)}},"候補にないので手入力する"),
+    formBox,el("div",{class:"row"},saveBtn));
+  q.onkeydown=e=>{if(e.key==="Enter")doSearch()};
+  root.append(el("div",{class:"scrim",onclick(e){if(e.target===this)close()}},sheet));
+  if(p.candidates&&p.candidates.length)showCands(p.candidates);else if(q.value)doSearch();else msg.textContent="書名で探してください。";
+}
+
+/* ================= manual add ================= */
+let mPhoto=null;
+$("#mPhoto").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;$("#mPhotoName").textContent="切り抜き中…";
+  try{mPhoto=await cropFile(f);$("#mPhotoName").textContent="表紙の写真を付けました"}catch{$("#mPhotoName").textContent="写真を読み込めませんでした"}};
+$("#mSearch").onclick=()=>{
+  const title=$("#mTitle").value.trim(),code=normCode($("#mCode").value),fmt=$("#mFmt").value;
+  if(!title&&!code){$("#mMsg").className="msg err";$("#mMsg").textContent="書名かISBN/JANのどちらかを入れてください。";return}
+  if(code&&/^97/.test(code)&&!isbn13ok(code)){$("#mMsg").className="msg err";$("#mMsg").textContent="ISBNの番号が正しくないようです。確かめてください。";return}
+  $("#mMsg").textContent="";
+  openChooser({title:title||"",isbn:code&&isbn13ok(code)?code:"",format:fmt,front:mPhoto},()=>{$("#mTitle").value="";$("#mCode").value="";mPhoto=null;$("#mPhotoName").textContent=""});
+};
+
+/* ================= render ================= */
+function filtered(){
+  const q=filt.q.toLowerCase();
+  return books.filter(b=>(filt.fmt==="すべて"||b.format===filt.fmt||(filt.fmt==="未読"&&b.status==="未読"))&&(!q||[b.title,b.author,b.publisher,b.isbn,b.memo,b.location].join(" ").toLowerCase().includes(q)))
+    .sort((a,b)=>String(a[sort.k]||"").localeCompare(String(b[sort.k]||""),"ja",{numeric:true})*sort.dir);
+}
+function chips(id){const box=$(id);box.innerHTML="";for(const c of ["すべて","紙","紙（表紙なし）","電子","未読"]){box.append(el("button",{class:"chip","aria-pressed":String(filt.fmt===c),onclick:()=>{filt.fmt=c;render()}},c))}}
+const imgFor=b=>thumbMem[b.id]||b.coverUrl||"";
+function render(){
+  const n=books.length,e=books.filter(b=>b.format==="電子").length,done=books.filter(b=>b.status==="読了").length;
+  $("#stats").innerHTML="";[[n,"冊"],[n-e,"紙"],[e,"電子"],[done,"読了"]].forEach(([v,l])=>$("#stats").append(el("span",{},el("b",{text:v}),l)));
+  chips("#chips1");chips("#chips2");
+  const list=filtered(),sh=$("#shelf");sh.innerHTML="";
+  if(!cfg.url){sh.style.display="block";sh.append(el("div",{class:"empty"},el("h2",{text:"はじめに保存先を設定します"}),el("p",{text:"Google ドライブに置いた受け口のURLと合言葉を入れると使えるようになります。"}),el("button",{class:"btn primary",onclick:openSettings},"設定を開く")))}
+  else if(!n){sh.style.display="block";sh.append(el("div",{class:"empty"},el("h2",{text:"本棚はまだ空です"}),el("p",{text:"「登録」から集中撮影を始めると、表紙と裏表紙を撮るだけで次々に並んでいきます。"}),el("button",{class:"btn primary",onclick:()=>go("add")},"登録を始める")))}
+  else{sh.style.display="";
+    for(const b of list){
+      const face=el("div",{class:"face"});const src=imgFor(b);
+      if(src)face.append(el("img",{src,alt:"",loading:"lazy"}));else face.append(el("div",{class:"noimg"},el("span",{text:b.title}),el("small",{text:b.author||""})));
+      if(b.format==="電子")face.append(el("span",{class:"badge",text:"電子"}));
+      sh.append(el("button",{class:"cover",onclick:()=>openDetail(b.id)},face,el("div",{class:"t",text:b.title})));
+    }
+    if(!list.length)sh.append(el("p",{class:"note",text:"条件に合う本はありません。"}));
+  }
+  // table
+  const th=$("#thead");th.innerHTML="";const tr=el("tr",{},el("th",{text:"表紙"}));
+  for(const x of FIELDS)tr.append(el("th",{class:x.k==="title"?"sticky":"",style:"min-width:"+x.w+"px",onclick:()=>{sort={k:x.k,dir:sort.k===x.k?-sort.dir:1};render()}},x.l+(sort.k===x.k?(sort.dir>0?" ▲":" ▼"):"")));
+  th.append(tr);
+  const tb=$("#tbody");tb.innerHTML="";
+  for(const b of list){
+    const r=el("tr");const src=imgFor(b);
+    r.append(el("td",{class:"th"},src?el("img",{src,alt:"",onclick:()=>openDetail(b.id)}):el("div",{class:"ph",onclick:()=>openDetail(b.id)})));
+    for(const x of FIELDS){
+      let inp;if(x.opts){inp=el("select",{"aria-label":x.l,id:"c_"+b.id+"_"+x.k});x.opts.forEach(o=>inp.add(new Option(o,o)))}else inp=el("input",{"aria-label":x.l,id:"c_"+b.id+"_"+x.k});
+      inp.value=b[x.k]||"";inp.onchange=()=>patchBook(b.id,{[x.k]:x.k==="isbn"?normCode(inp.value):inp.value});
+      r.append(el("td",{class:(x.mono?"mono ":"")+(x.k==="title"?"sticky":"")},inp));
+    }
+    tb.append(r);
+  }
+  $("#sheetLink").hidden=!sheetUrl;if(sheetUrl)$("#sheetLink").href=sheetUrl;
+  // pending
+  $("#pendBox").hidden=!pending.length;$("#pendN").textContent=pending.length+"冊";
+  $("#pendDot").hidden=!pending.length;$("#pendDot").textContent=pending.length;
+  const pl=$("#pendList");pl.innerHTML="";
+  for(const p of pending){
+    const imgs=el("div",{class:"imgs"});[p.front,p.back].filter(Boolean).forEach(im=>imgs.append(el("img",{src:im.url,alt:""})));
+    pl.append(el("div",{class:"pend"},imgs,el("div",{class:"info"},el("div",{text:p.isbn?"ISBN "+p.isbn:"バーコードなし"}),el("div",{class:"note",text:(p.candidates||[]).length?p.candidates.length+"件の候補":"候補なし・書名で探してください"})),
+      el("div",{class:"row"},el("button",{class:"btn primary",onclick:()=>openChooser(p,()=>{pending=pending.filter(x=>x.lid!==p.lid);idb.del("pending",p.lid);render()})},"選ぶ"),
+        el("button",{class:"btn",onclick:()=>{pending=pending.filter(x=>x.lid!==p.lid);idb.del("pending",p.lid);render()}},"捨てる"))));
+  }
+}
+async function patchBook(id,patch){
+  const b=books.find(x=>x.id===id);if(!b)return;Object.assign(b,patch);cacheBooks();
+  try{await api("update",{id,patch});toast("保存しました")}catch(e){toast("保存できませんでした："+e.message)}
+}
+$("#q1").oninput=e=>{filt.q=e.target.value;$("#q2").value=e.target.value;render()};
+$("#q2").oninput=e=>{filt.q=e.target.value;$("#q1").value=e.target.value;render()};
+$("#reload").onclick=()=>loadAll().then(()=>toast("最新にしました"));
+
+/* ================= detail ================= */
+function openDetail(id){
+  const b=books.find(x=>x.id===id);if(!b)return;const root=$("#sheetRoot");root.innerHTML="";const close=()=>root.innerHTML="";
+  const edit={};const form=el("div",{class:"form"});
+  for(const x of FIELDS){let inp;if(x.opts){inp=el("select",{id:"s_"+x.k});x.opts.forEach(o=>inp.add(new Option(o,o)))}else inp=el("input",{id:"s_"+x.k});
+    inp.value=b[x.k]||"";inp.oninput=()=>edit[x.k]=inp.value;form.append(el("label",{class:x.k==="title"||x.k==="memo"?"full":""},x.l,inp))}
+  const src=imgFor(b),conf=el("div");
+  const fi=el("input",{type:"file",accept:"image/*",class:"vh",id:"recover"});
+  fi.onchange=async()=>{const f=fi.files[0];if(!f)return;toast("表紙をPDFにしています…");
+    try{const im=await cropFile(f);const thumb=await thumbOf(im);const j=await api("cover",{id:b.id,pdf:buildPdf([im]),thumb:thumb.split(",")[1]});
+      Object.assign(b,j.book);thumbMem[b.id]=thumb;idb.put("thumbs",thumb,b.id);cacheBooks();render();close();openDetail(b.id);toast("表紙を保存しました")}catch(e){toast("保存できませんでした："+e.message)}};
+  const sheet=el("div",{class:"sheet",role:"dialog","aria-modal":"true"},
+    el("div",{class:"top"},el("h3",{text:b.title}),el("button",{class:"x","aria-label":"閉じる",onclick:close},"×")),
+    src?el("div",{class:"bigimgs"},el("img",{src,alt:"表紙"})):null,
+    el("div",{class:"row"},b.pdfUrl?el("a",{class:"btn",href:b.pdfUrl,target:"_blank",rel:"noopener"},"表紙PDFを開く（ドライブ）"):null,
+      el("label",{class:"btn",for:"recover"},b.pdfUrl?"表紙を撮り直す":"表紙の写真を追加"),fi),
+    form,
+    el("div",{class:"row"},el("button",{class:"btn primary",async onclick(){if(edit.isbn)edit.isbn=normCode(edit.isbn);await patchBook(b.id,edit);render();close()}},"変更を保存"),
+      el("button",{class:"btn danger",onclick(){conf.innerHTML="";conf.append(el("div",{class:"confirm"},el("span",{text:"「"+b.title+"」と表紙PDFを削除します（PDFはドライブのゴミ箱へ）。"}),
+        el("button",{class:"btn danger",async onclick(){try{await api("delete",{id:b.id});books=books.filter(x=>x.id!==b.id);cacheBooks();idb.del("thumbs",b.id);render();close();toast("削除しました")}catch(e){toast(e.message)}}},"削除する"),
+        el("button",{class:"btn",onclick:()=>conf.innerHTML=""},"やめる")))}},"削除")),conf);
+  root.append(el("div",{class:"scrim",onclick(e){if(e.target===this)close()}},sheet));
+}
+
+/* ================= settings ================= */
+function openSettings(){
+  const root=$("#sheetRoot");root.innerHTML="";const close=()=>root.innerHTML="";
+  const u=el("input",{id:"cfgUrl",placeholder:"https://script.google.com/macros/s/…/exec",value:cfg.url});
+  const t=el("input",{id:"cfgTok",placeholder:"setup のログに出た合言葉",value:cfg.token});
+  const a=el("input",{type:"checkbox",id:"cfgAuto"});a.checked=cfg.auto;
+  const msg=el("div",{class:"msg"});
+  const sheet=el("div",{class:"sheet",role:"dialog","aria-modal":"true"},
+    el("div",{class:"top"},el("h3",{text:"設定"}),el("button",{class:"x","aria-label":"閉じる",onclick:close},"×")),
+    el("div",{class:"form"},el("label",{class:"full"},"保存先URL（Apps Script のウェブアプリ）",u),el("label",{class:"full"},"合言葉",t)),
+    el("label",{class:"row",style:"font-size:14px"},a,"ISBNで本が1冊に決まったら、選ばずに自動で登録する"),
+    msg,
+    el("div",{class:"row"},el("button",{class:"btn primary",async onclick(){
+      cfg.url=u.value.trim();cfg.token=t.value.trim();cfg.auto=a.checked;saveCfg();msg.className="msg";msg.textContent="接続を確かめています…";
+      try{const j=await api("ping");sheetUrl=j.sheetUrl||"";msg.textContent="つながりました。";setTimeout(()=>{close();loadAll()},700)}catch(e){msg.className="msg err";msg.textContent=e.message}
+    }},"保存して接続テスト")));
+  root.append(el("div",{class:"scrim",onclick(e){if(e.target===this)close()}},sheet));
+}
+$("#openSettings").onclick=openSettings;
+
+/* ================= nav ================= */
+function go(t){document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===t));for(const v of ["shelf","table","add"])$("#v-"+v).hidden=v!==t;window.scrollTo(0,0)}
+document.querySelectorAll("nav.tabs button").forEach(b=>b.onclick=()=>go(b.dataset.tab));
+$("#startScan").onclick=startScan;
+let tt;function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2800)}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+loadAll();
+setTimeout(loadCV,1500); // 切り抜き機能を先に読み込んでおく
+</script>
+</body>
+</html>
